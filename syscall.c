@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 #include <ctype.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,17 +38,27 @@ enum endian endianness(void) {
   return *((char *) &test) ? ENDIAN_LITTLE : ENDIAN_BIG;
 }
 
-/* interpret a hexadecimal character as a nibble */
-int hton(unsigned char *dest, char c) {
+/* decode a hexadecimal character */
+int hex_decodec(uint8_t *dest, char c) {
+  if (dest == NULL) {
+    return -EFAULT;
+  }
+
+  /* decode */
+
   c = tolower(c);
 
-  if (c < '0'
-      || (c > '9'
-        && c < 'a')
-      || c > 'f') {
+  if (c >= '0'
+      && c <= '9') {
+    *dest = c - '0';
+  } else if (c >= 'a'
+      && c <= 'f') {
+    *dest = c - 'a' + 10;
+  } else {
+    /* not a hexadecimal character */
+
     return -EINVAL;
   }
-  *dest = c < 'a' ? c - '0' : c - 'a' + 10;
   return 0;
 }
 
@@ -55,38 +66,7 @@ int hton(unsigned char *dest, char c) {
 interpret a string as an unsigned long in hexadecimal (native endianness),
 and put the result into `dest`
 */
-int htoul(unsigned long *dest, const char *a) {
-  unsigned char c;
-  int i;
-  int retval;
-  int shift;
-
-  if (a == NULL)
-    return -EFAULT;
-
-  if (strlen(a) < 2
-      || strlen(a) > 2 + 2 * sizeof(*dest)
-      || *a != '0'
-      || (a[1] != 'X'
-        && a[1] != 'x'))
-    return -EINVAL;
-
-  if (dest == NULL)
-    return -EFAULT;
-
-  /* read into dest */
-
-  *dest = 0;
-
-  for (i = strlen(a) - 1, shift = 0; i >= 2; i--, shift += 4) {
-    retval = hton(&c, a[i]);
-
-    if (retval)
-      return retval;
-    *dest |= ((unsigned long) c) << shift;
-  }
-  return 0;
-}
+int xtoul(unsigned long *dest, const char *a);
 
 int main(int argc, char **argv) {
   unsigned long args[7];
@@ -116,18 +96,13 @@ int main(int argc, char **argv) {
         && tolower(*(argv[i] + 1)) == 'x') {
       /* seems like it's a hex argument */
       
-      if (htoul(&args[i - 1], argv[i])) {
+      if (xtoul(&args[i - 1], argv[i])) {
         fprintf(stderr, "Saw \"0x\" prefix, but got malformed hex: \"%s\"\n",
           argv[i]);
         return 1;
       }
     } else if (!strncmp(argv[i], "-A", 2)) {
-      /*
-      got string classification prefix
-
-      unfortunately, we need this prefix,
-      especially when considering whether "0" is a string or an array
-      */
+      /* character array */
 
       if (strlen(argv[i]) > 2) {
         args[i - 1] = (unsigned long) (argv[i] + 2);
@@ -168,5 +143,38 @@ int main(int argc, char **argv) {
 
   printf("\t->0x%lx\n.", syscall(args[0], args[1], args[2], args[3], args[4],
     args[5], args[6]));
+}
+
+int xtoul(unsigned long *dest, const char *a) {
+  uint8_t c;
+  int i;
+  int retval;
+  int shift;
+
+  if (a == NULL)
+    return -EFAULT;
+
+  if (strlen(a) < 2
+      || strlen(a) > 2 + 2 * sizeof(*dest)
+      || *a != '0'
+      || (a[1] != 'X'
+        && a[1] != 'x'))
+    return -EINVAL;
+
+  if (dest == NULL)
+    return -EFAULT;
+
+  /* read into dest */
+
+  *dest = 0;
+
+  for (i = strlen(a) - 1, shift = 0; i >= 2; i--, shift += 4) {
+    retval = hex_decodec(&c, a[i]);
+
+    if (retval)
+      return retval;
+    *dest |= ((unsigned long) c) << shift;
+  }
+  return 0;
 }
 
